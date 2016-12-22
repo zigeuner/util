@@ -10,8 +10,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from SloppyCell.ReactionNetworks import *
 
-from util import butil, plotutil
-from util.sloppycell.mca import mcautil
+from util2 import butil, plotutil
+from util2.sloppycell.mca import mcautil
 reload(butil)
 reload(plotutil)
 reload(mcautil)
@@ -111,7 +111,7 @@ def plot_trajs_xny(traj_x, traj_y, figsize=(8,6), subplots=True,
         plotvarids_x: assume the corresponding varids in traj_y are also 
                       available; conversion is done using libflux.x22y
         ts_mark: if given, mark the timepoints, used for highlighting
-                 ensemble times (from equipartition of variation)
+                 sampling times (from equipartition of variation)
     """
     from fluxest import x22y
     

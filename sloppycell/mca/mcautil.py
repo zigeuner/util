@@ -1,7 +1,7 @@
 """
 This is a library of class and functions for computations related to
 steady states and Metabolic Control Analysis (MCA).
-MCA is essentially first-order sensitivity analysis of a metabolic model at
+MCA is essentially first-order sensitivity analysis of a metabolic models at
 steady-state. For this reason, a network instance passed to any function in
 this library is checked for steady state.
 """
@@ -20,9 +20,9 @@ import matplotlib.pyplot as plt
 from SloppyCell.ReactionNetworks import *
 from SloppyCell import ExprManip as Ex
 
-from util import butil
+from util2 import butil
 reload(butil)
-from util.sloppycell import netutil
+from util2.sloppycell import netutil
 reload(netutil)
 
 
@@ -124,10 +124,14 @@ class MCAMatrix(np.matrix):
         A customization of np.matrix.__mul__ so that if two MCAMatrix instances
         are passed in, their meta-info of rowvarids and colvarids are kept.
         """
-        if isinstance(other, MCAMatrix):
-            rowvarids = self.rowvarids
-            colvarids = other.colvarids
-            return MCAMatrix(np.matrix.__mul__(self, other), 
+        if other.ndim == 2:
+            try:
+                rowvarids = self.rowvarids
+                colvarids = other.colvarids
+            except:
+                rowvarids = None
+                colvarids = None
+            return MCAMatrix(np.matrix(self)*np.matrix(other), 
                              rowvarids=rowvarids, colvarids=colvarids)
         else:
             return np.matrix.__mul__(self, other)
@@ -800,7 +804,11 @@ def get_flux_ctrl_mat(net, paramvals=None, normed=False):
         raise AttributeError
         return get_matrix_trial(net, attr, paramvals)
     except (ValueError, AttributeError):
-        update_net(net, paramvals=paramvals, time=np.inf)
+        #update_net(net, paramvals=paramvals, time=np.inf)
+
+        if paramvals is not None:
+            net.set_p(paramvals)
+        net.set_ss()
         
         C_s = get_concn_ctrl_mat(net)
         eps_s = get_concn_elas_mat(net)

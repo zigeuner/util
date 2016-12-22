@@ -9,8 +9,8 @@ import numpy as np
 from SloppyCell.ReactionNetworks import *
 from SloppyCell import ExprManip as expr
 
-from util import butil
-from util.sloppycell import rxnutil
+from util2 import butil
+from util2.sloppycell import rxnutil
 reload(butil)
 reload(rxnutil)
 
@@ -282,7 +282,7 @@ class StoichiometryMatrix(np.matrix):
             
         rmvarids = get_remove_varids_trial(pools)
         # check if there are identical elements in rmvarids;
-        # repeat the random ensemble if there are, as only one dynvar
+        # repeat the random sampling if there are, as only one dynvar
         # is removed for each conservation constraint
         while len(rmvarids) != len(set(rmvarids)):
             rmvarids = get_remove_varids_trial(pools)

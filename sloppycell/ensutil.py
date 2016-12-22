@@ -1,5 +1,5 @@
 """
-Some utility functions for the SloppyCell ensemble 
+Some utility functions for the SloppyCell sampling 
 constructions and analysis.
 """
 
@@ -18,11 +18,11 @@ from pandas.tools.plotting import autocorrelation_plot
 
 from SloppyCell.ReactionNetworks import *
 
-from util import butil, plotutil
+from util2 import butil, plotutil
 reload(butil)
 reload(plotutil)
 
-#from util.sloppycell import netutil
+#from util2.sloppycell import netutil
 #reload(netutil)
 
 
@@ -46,7 +46,7 @@ class VariableEnsemble(pd.DataFrame):
         """
         Input:
             qs: quantiles
-            f_sort: a function that sorts the ensemble (see the doc of sort_var)
+            f_sort: a function that sorts the sampling (see the doc of sort_var)
             norm: normalize by the given vals_norm
             log10: log10 transform
             vals_mark: if given, mark those values
@@ -148,7 +148,7 @@ class VariableEnsemble(pd.DataFrame):
     
     def sort_var(self, f=None, vids=None, reverse=False):
         """
-        Sort the variables (columns) and output a new ensemble instance.
+        Sort the variables (columns) and output a new sampling instance.
         
         Input:
             f: a function that takes in a column and outputs something to be 
@@ -814,7 +814,7 @@ class MatrixEnsemble(np.ndarray):
     def plot_traj_ensemble(self, net, T, varids=None, N=None, 
                            traj_timeseries=None, CV=None):
         """
-        N: number of parameter sets to generate the traj ensemble
+        N: number of parameter sets to generate the traj sampling
         """
         ens_unique = self.get_unique_ensemble()
         if N:
@@ -845,7 +845,7 @@ class MatrixEnsemble(np.ndarray):
 def get_variable_ensemble(net, ens_paramvals, get_vars, rowvarids=None, 
                           colvarids=None, skip_fail=False, print_fail=False):
     """
-    Return an ensemble instance
+    Return an sampling instance
     get_vars: a function that takes a network and a set of parameter values 
               as the input and outputs variable values of interest
     skip:

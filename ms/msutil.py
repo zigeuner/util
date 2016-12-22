@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 
 from SloppyCell.ReactionNetworks import *
 
-from util import butil, plotutil
+from util2 import butil, plotutil
 reload(butil)
 reload(plotutil)
 
@@ -321,8 +321,8 @@ class MSData(pd.DataFrame):
         
         # rKFP
         else:
-            cond2suffix = butil.change_values(cond2netid, 
-                                              lambda netid: netid[-2:])
+            cond2suffix = butil.chvals(cond2netid, 
+                                       lambda netid: netid[-2:])
             
             def f(tu):
                 if len(tu)==2 or tu[2]=='C13':
@@ -337,8 +337,8 @@ class MSData(pd.DataFrame):
                 statdf_cond = MSData(df_cond).get_stats(ret_one_df=True, 
                                                         ret_one_col=True)
                 statdf_cond.columns = [f(item) for item in statdf_cond.columns.tolist()]
-                data_cond = butil.change_keys(statdf_cond.to_dict(), 
-                                              lambda key: ''.join(key))
+                data_cond = butil.chkeys(statdf_cond.to_dict(), 
+                                         lambda key: ''.join(key))
                 for spid, data_cond_sp in data_cond.items():
                     if '_l' in spid:
                         data_cond_sp[0] = (0, data_cond_sp[0][1])

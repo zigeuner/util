@@ -1,5 +1,5 @@
 """
-Some utility functions for the SloppyCell ensemble 
+Some utility functions for the SloppyCell sampling 
 constructions and analysis.
 """
 
@@ -18,7 +18,7 @@ from pandas.tools.plotting import autocorrelation_plot
 
 from SloppyCell.ReactionNetworks import *
 
-from util import butil, plotuti
+from util2 import butil, plotuti
 reload(butil)
 
 

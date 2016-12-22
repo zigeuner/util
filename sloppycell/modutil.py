@@ -13,11 +13,11 @@ import matplotlib.pyplot as plt
 
 from SloppyCell.ReactionNetworks import *
 
-from util import butil, plotutil
+from util2 import butil, plotutil
 reload(butil)
 reload(plotutil)
-from util.sloppycell import netutil, trajutil, ensutil
-from util.sloppycell.mca import mcautil
+from util2.sloppycell import netutil, trajutil, ensutil
+from util2.sloppycell.mca import mcautil
 reload(netutil)
 reload(trajutil)
 reload(ensutil)
@@ -182,7 +182,7 @@ def sampling(mod, nstep, pvals=None, cutoff_singval=1e-6, seed=None,
                                                    step_scale=step_scale,
                                                    interval_recalc_hess=interval_recalc_hess,
                                                    interval_print_step=interval_print_step)
-        # model, seed, r: custom attributes to be attached to pens (serialization?)
+        # models, seed, r: custom attributes to be attached to pens (serialization?)
         pens = ensutil.ParameterEnsemble.from_sc_output(ens, gs, paramids=pids, 
                                                         model=mod, seed=seed, r=r)
         return pens

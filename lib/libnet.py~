@@ -1,0 +1,401 @@
+"""
+Some utility functions for the SloppyCell Network instances.
+"""
+from __future__ import division
+import string
+import random
+import subprocess
+import re
+import sets  # for SloppyCell replacements: Calculate, GetResult
+
+import numpy as np
+import scipy as sp
+
+from SloppyCell.ReactionNetworks import *
+from SloppyCell import ExprManip as expr
+
+import libtraj
+reload(libtraj)
+     
+
+"""
+class StoichiometryMatrix(np.matrix):
+
+    def __new__(cls, matrix0, dynvarids=None, rxnids=None):
+        obj = np.matrix(matrix0).view(cls)
+        obj.dynvarids = dynvarids
+        obj.rxnids = rxnids
+        obj.nspp = len(dynvarids)
+        obj.nrxns = len(rxnids)
+        return obj
+
+    def __array_finalize__(self, obj):
+        if obj is None: 
+            return
+        self.dynvarids = getattr(obj, 'dynvarids', None)
+        self.rxnids = getattr(obj, 'rxnids', None)
+        self.nspp = getattr(obj, 'nspp', None)
+        self.nrxns = getattr(obj, 'nrxns', None)
+"""    
+"""
+    def get_conserved_pools_old(self, eps=1e-10):
+        ""
+        integer basis of left null space of stoich mat
+        Vh: Hermitian of V
+        ""
+        U, S, Vh = np.linalg.svd(self.transpose())
+        # nullspace is a matrix whose ROWs are basis vectors of
+        # nullspace of stoichmat.transpose()
+        nullspace = Vh[self.nspp - np.linalg.matrix_rank(self), :]
+        pools = []
+        for vec in nullspace:
+            intvec = self.__class__.integerize(vec)
+            pools.append(dict(zip(self.dynvarids, intvec.flat)))
+        return pools
+"""
+
+"""
+    @staticmethod
+    def integerize(floatvec, k=3, eps=1e-6):
+        ""
+        A lame solution to the problem detailed here:
+        http://stackoverflow.com/questions/14407579/how-to-get-the-integer-eigenvectors-of-a-numpy-matrix
+
+        positive
+        ""
+        n = floatvec.size
+        for i in range(1, n * k**2):
+            floatvec2 = floatvec * np.sqrt(i)
+            floatvec3 = np.round(floatvec2)
+            if np.linalg.norm(floatvec2 - floatvec3) < eps:
+                intvec = np.array(floatvec3, dtype='int')
+                intvec_pos = np.abs(intvec)  # pos for positive
+                if not np.array_equal(intvec_pos, intvec) and \
+                   not np.array_equal(intvec_pos, -intvec):
+                    raise Exception('Float vector not all positive or negative.')
+                return intvec_pos
+        raise Exception('Float vector failed to be integerized.')
+    
+
+    @staticmethod
+    def pool2poolstr(pool):
+        ""
+        It logically belongs to here.
+        ""
+        trantab = string.maketrans(':,', '*+')
+        poolstr = pool.__str__().translate(trantab, "\'{} ")
+        return poolstr
+
+
+    @staticmethod
+    def get_remove_varids(pools):
+        ""
+        return a list of varids whose values are to be removed
+        from ...
+        ""
+        def get_remove_varids_trial(pools):
+            rmvarids = []
+            for pool in pools:
+                varids = [varid for varid in pool.keys() if pool[varid]!=0]
+                rmvarids.append(random.choice(varids))
+            return rmvarids
+            
+        rmvarids = get_remove_varids_trial(pools)
+        # check if there are identical elements in rmvarids;
+        # repeat the random sampling if there are, as only one dynvar
+        # is removed for each conservation constraint
+        while len(rmvarids) != len(set(rmvarids)):
+            rmvarids = get_remove_varids_trial(pools)
+        return rmvarids
+
+
+def get_pools(net, recalculate=False):
+    if hasattr(net, 'pools') and not recalculate:
+        return net.pools
+    
+    if hasattr(net, 'stoichmat'):
+        stoichmat = net.stoichmat
+    else:
+        stoichmat = get_stoich_mat(net)
+    pools = stoichmat.get_conserved_pools()
+    net.pools = pools
+    return pools
+
+
+def get_remove_varids(net, recalculate=False):
+
+    if hasattr(net, 'rmvarids') and not recalculate:
+        return net.rmvarids
+    
+    if hasattr(net, 'pools'):
+        pools = net.pools
+    else:
+        pools = get_pools(net, recalculate=recalculate)
+    rmvarids = StoichiometryMatrix.get_remove_varids(pools)
+    net.rmvarids = rmvarids
+    return rmvarids
+"""
+
+def get_fsolve_function(net, paramvals=None):
+    """
+    Return a function to be passed to scipy.optimization.fsolve for 
+    root finding.
+    """
+    if paramvals is not None:
+        net.update_optimizable_vars(paramvals)
+
+    net.compile()
+
+    pools = get_pools(net)
+    dynvarids = net.dynamicVars.keys()
+    rmvarids = get_remove_varids(net)
+    rmvaridxs = [dynvarids.index(rmvarid) for rmvarid in rmvarids]
+
+    def fsolvefunc(dynvarvals):
+        """
+        to be passed to scipy.optimization.fsolve, hence the name
+        """
+        # from SloppyCell doc: 
+        # residual = res_function(time,dynamicVars,yprime,constants)
+        R = net.res_function(0, dynvarvals, np.zeros(len(dynvarvals)), 
+                             net.constantVarValues)
+        R_reduced = np.delete(R, rmvaridxs)
+        C = []
+        for pool in pools:
+            poolsize_init = sum([net.dynamicVars.get(varid).value * mul
+                                 for (varid, mul) in pool.items()])
+            poolsize_now = sum([dynvarvals[dynvarids.index(varid)] * mul
+                                for (varid, mul) in pool.items()])
+            C.append(poolsize_now - poolsize_init)
+        f = np.array(R_reduced.tolist() + C)
+        return f
+
+    return fsolvefunc
+
+
+def clean(net, optvarids=None):
+    """
+    """
+    net = net.copy()
+    for var in net.variables:
+        ## Set variables determined by boundary conditions as constant.
+        try:
+            if var.is_boundary_condition:
+                net.set_var_constant(var.id, True)
+        except AttributeError:
+            pass
+        ## Set optimizable variables.
+        try:
+            if var.id in optvarids:
+                net.set_var_optimizable(var.id, True)
+            else:
+                net.set_var_optimizable(var.id, False)
+        except TypeError:
+            pass
+    return net
+
+
+def add_fluxes(net):
+    """
+    """
+    net = net.copy()  # keeping the original copy intact
+    net.fluxVars = KeyedList()
+    for rxn in net.reactions:
+        fluxid = 'J_' + rxn.id
+        net.add_parameter(fluxid, is_constant=False, is_optimizable=False)
+        net.add_assignment_rule(fluxid, rxn.kineticLaw)
+        net.fluxVars.set(fluxid, net.assignedVars.get(fluxid))
+    return net
+
+
+def update_net(net, paramvals=None, dynvarvals=None, time=None, method='root',
+               T=1e4, tol_fsolve=1e-12, tol_ss=1e-4):
+    """
+    Update the values of parameters, dynamic variables and assigned variables
+    for a network, and NOT return anything.
+    
+    """
+    if paramvals:
+        net.update_optimizable_vars(paramvals)
+    # if both time and dynvarvals are provided, time info is going to 
+    # override the dynvarvals
+    if time:
+        if time == np.inf:
+            if if_net_steady_state(net):
+                return
+            else:
+                dynvarvals = get_steady_state_concentrations(net, 
+                                    paramvals=paramvals, method=method, 
+                                    T=T, tol_fsolve=tol_fsolve, tol_ss=tol_ss)
+        else:
+            # compute dynvarvals according to the given time
+            traj = Dynamics.integrate(net, [0,time], fill_traj=False)
+            dynvarvals = traj.values[-1,:]
+    if dynvarvals:
+        # it will update assigned variables as well
+        net.updateVariablesFromDynamicVars(dynvarvals, time)
+
+
+def if_net_steady_state(net, dynvarvals=None, tol=1e-6):
+    """
+    """
+    if dynvarvals is None:
+        dynvarvals = [var.value for var in net.dynamicVars]
+    if hasattr(net, 'fsolvefunc'):
+        fsolvefunc = net.fsolvefunc
+    else:
+        fsolvefunc = get_fsolve_function(net)
+        net.fsolvefunc = fsolvefunc
+    if np.sum(np.abs(fsolvefunc(dynvarvals))) < tol:
+        return True
+    else:
+        return False
+
+
+def get_dres_dp_function(net, paramvals=None):
+    """
+    """
+    if paramvals is not None:
+        net.update_optimizable_vars(paramvals)
+    net.compile()
+    optvarids = [var.id for var in net.optimizableVars]
+    
+    # a collection of parameter sensitivity functions
+    def dres_dp_function(time, dynvarvals, yprime, consts, net=net):
+        dres_dp_funcs = [eval('net.dres_d'+varid) for varid in optvarids]
+        dRdp = [func(time, dynvarvals, yprime, consts) 
+                for func in dres_dp_funcs]
+        dRdp = np.transpose(np.array(dRdp))
+        return dRdp
+
+    return dres_dp_function
+
+
+def get_steady_state_concentrations(net, paramvals=None, method='root', T=1e4,
+                                    tol_fsolve=1e-12, tol_ss=1e-4):
+    """
+    Return a keyedlist.
+    """
+    if paramvals is None and if_net_steady_state(net):
+        return [var.value for var in net.dynamicVars]
+    if method in ['simulation', 'numeric', 'numerical', 'integration']:
+        # use numerical integration to compute the steady states
+        traj = Dynamics.integrate(net, [0,T], params=paramvals, fill_traj=False)
+        ndynvar = len(net.dynamicVars)
+        dynvarssvals = traj.values[-1, :ndynvar]  # the rest are assignvars
+        if not if_net_steady_state(net, dynvarssvals, tol_ss):
+            print "Warning: net has not reached steady state for parameters: ",\
+                  [(p.id, p.value) for p in net.optimizableVars], "\n"
+        return KeyedList(zip(net.dynamicVars.keys(), dynvarssvals))
+    if method in ['root', 'rootfinding', 'fsolve', 'algebra']:
+        # use algebraic root-finding to compute the steady states
+        fsolvefunc = get_fsolve_func(net, paramvals=paramvals)
+        dynvarvals = [var.value for var in net.dynamicVars]
+        dynvarssvals = sp.optimize.fsolve(fsolvefunc, dynvarvals, 
+                                          xtol=tol_fsolve)
+        if not if_net_steady_state(net, dynvarssvals, tol_ss):
+            print "Warning: net has not reached steady state for parameters: ",\
+                  [(p.id, p.value) for p in net.optimizableVars], "\n"
+        return KeyedList(zip(net.dynamicVars.keys(), dynvarssvals))
+    
+
+def Calculate(net, vars, paramvals=None):
+    """
+    A replacement of SloppyCell class Network method Calculate
+    to include steady-state computations:
+      sloppycell.sourceforge.net/api/SloppyCell.ReactionNetworks.
+      Network_mod-pysrc.html#Network.Calculate
+    """
+    t = set([])
+    ## flag 'has_inf' detects if there is scipy.inf in times;
+    ## if yes, remove scipy.inf from the list, marks the flag  True
+    ## and calls a routine to calculate steady-state concentrations
+    has_inf = False
+    for var, times in vars.items():
+        if net.variables.has_key(var):
+            if sp.inf in times:
+                has_inf = True
+                times.remove(sp.inf)
+            t = set.union(t, set(times))
+        else:
+            raise ValueError('Unknown variable %s requested from network %s'
+                             % (var, net.id))
+
+    t = sorted(list(t))
+    if t:
+        traj1 = Dynamics.integrate(net, t, params=paramvals, fill_traj=False)
+    else:
+        traj1 = Trajectory_mod.Trajectory(net)  # empty traj
+    if has_inf:
+        dynvarssvals = get_steady_state_concentrations(net, paramvals=paramvals)
+        traj2 = libtraj.get_steady_state_traj(dynvarssvals, net, t=sp.inf)
+    else:
+        traj2 = Trajectory_mod.Trajectory(net)  # empty traj
+    traj = libtraj.merge_trajs(traj1, traj2, net)
+    net.trajectory = traj
+
+
+def GetResult(net, varids):
+    """
+    """
+    result = {}
+    for varid in varids:
+        traj = net.trajectory.getVariableTrajectory(varid)
+        result[varid] = dict(zip(net.trajectory.timepoints, traj))
+    return result
+
+
+"""
+def get_funcs(net):
+    dynvarids = net.dynamicVars.keys()
+    constvarids = net.constantVars.keys()
+    paramids = net.parameters.keys()
+    constvarvals = [var.value for var in net.constantVars]
+    paramvals = [p.value for p in net.parameters.values()]
+
+    stoichmat = get_stoich_mat(net)
+    pools = stoichmat.get_conserved_pools()
+
+    def get_maps(concns, params):
+        paramid2val = dict(zip(constvarids, constvarvals)) 
+        paramid2val.update(dict(zip(paramids, params)))
+        dynvarid2val = dict(zip(dynvarids, concns))
+        return dynvarid2val, paramid2val
+
+    def ratefunc_rxns(concns, params=paramvals):
+        ""
+        do I need to use this func?
+        ""
+        dynvarid2val, paramid2val = get_maps(concns, params)
+        kineticlaws = [expr.sub_for_vars(rxn.kineticLaw, paramid2val)
+                       for rxn in net.reactions]
+        rates_rxns = [eval(kl, dynvarid2val) for kl in kineticlaws]
+        return rates_rxns
+    
+    def ratefunc_spp(concns, params=paramvals):
+        rates_rxns = ratefunc_rxns(concns, params)
+        rates_rxns = np.array(rates_rxns).reshape((len(rates_rxns),1))
+        rates_spp = (stoichmat * rates_rxns).flatten().tolist()
+        return rates_spp
+
+    picks = StoichiometryMatrix.pick_from_pools(pools)
+    def fsolvefunc(concns, params=paramvals):
+        rates_spp = ratefunc_spp(concns, params)
+        rates_spp_reduced = [rates_spp[i] for i in range(len(rates_spp))
+                             if stoichmat.dynvarids[i] not in picks]
+        
+        # Adding conserved pool relationships
+        poolstrs = []
+        for pool in pools:
+            poolsize = 0
+            for varid, multiplicity in pool.items():
+                poolsize += net.variables.get(varid).value * multiplicity
+            poolstr = StoichiometryMatrix.pool2poolstr(pool)
+            poolstrs.append(poolstr + '-' + str(poolsize))
+
+        dynvarid2val, paramid2val = get_maps(concns, params)
+        delta_poolsizes = [eval(ps, dynvarid2val) for ps in poolstrs]
+        return rates_spp_reduced + delta_poolsizes
+    
+    return ratefunc_rxns, ratefunc_spp, fsolvefunc
+"""

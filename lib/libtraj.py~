@@ -1,0 +1,158 @@
+"""
+Some utility functions for the SloppyCell Trajectory instances.
+"""
+
+import numpy as np
+import matplotlib.pyplot as plt
+from SloppyCell.ReactionNetworks import *
+
+
+def plot_trajs(traj, varids, filepath, xlabel=None, title=None):
+    """
+    Plot the trajectories of given variables.
+    
+    Parameters
+    ----------
+    traj: a SloppyCell Trajectory instance.
+    varids: a list of variable ids, e.g., ['RuBP', 'v_r41139'].
+    filepath: a string of path for the figure to be saved.
+
+    Returns
+    -------
+    None
+    """
+    idxs = [traj.key_column.get(varid) for varid in varids]
+    plt.figure()
+    plt.plot(traj.timepoints, traj.values[:, idxs])
+    plt.legend(varids)
+    plt.xlabel(xlabel)
+    plt.title(title)
+    plt.savefig(filepath)
+
+def is_var_constant(traj, varid):
+    """
+    """
+    traj_id = traj.get_var_traj(varid)
+    return np.array_equal(traj_id, np.ones(len(traj_id))*traj_id[0])
+
+def get_steadystate(traj, varid):
+    """
+    need to be more sophisticated to check if a steady state has been reached
+    """
+    return traj.get_var_traj(varid)[-1]
+
+def get_steadystates(traj, varids):
+    """
+    """
+    return [get_steadystate(traj, varid) for varid in varids]
+
+def get_varid2traj(traj):
+    """
+    """
+    varid2traj = dict(zip(traj.key_column.keys(), np.transpose(traj.values)))
+    return varid2traj
+
+def if_traj_steady_state(traj, tol=1e-9):
+    derivs = (traj.values[-1,:] - traj.values[-2,:]) / \
+             (traj.timepoints[-1] - traj.timepoints[-2])
+    if np.max(np.abs(derivs)) < tol:
+        return True
+    else:
+        return False
+
+"""
+def add_steady_states(traj, dynvarssvals):
+    ""
+    Return a new traj instance with steady-state information added. 
+    time: scipy.inf
+    ""
+    
+    traj2 = traj.copy_subset()
+    traj2.timepoints = np.append(traj.timepoints, np.inf)
+    dynvarssvals = np.reshape(dynvarssvals, (1, len(dynvarssvals)))
+    traj2.values = np.append(traj.values, dynvarssvals, 0)
+    return traj2
+"""
+
+
+def get_steady_state_traj(dynvarvals, net, t=np.inf):
+    """
+    """
+    if not isinstance(dynvarvals, KeyedList):
+        dynvarvals = KeyedList(zip(net.dynamicVars.keys(), dynvarvals))
+    net.set_var_vals(dynvarvals)  # both dynvars and assignvars are updated
+    assignvarvals = [var.value for var in net.assignedVars]
+    varvals = list(dynvarvals) + assignvarvals
+
+    traj = Trajectory_mod.Trajectory(net)
+    traj.timepoints = np.array([t])
+    traj.values = np.array(varvals).reshape((1,len(varvals)))
+    return traj
+
+
+def merge_trajs(traj1, traj2, net):
+    """
+    A replacement of the Trajectory.merge method, which does not sort time, and
+    Trajectory.append method, which requires traj1.timepoints be before 
+    traj2.timepoints
+    """
+    ts1 = traj1.timepoints
+    dat1 = np.append(np.reshape(ts1, (len(ts1),1)), traj1.values, 1)
+    ts2 = traj2.timepoints
+    dat2 = np.append(np.reshape(ts2, (len(ts2),1)), traj2.values, 1)
+    dat = np.append(dat1, dat2, 0)
+    dat_sorted = sorted(zip(dat[:,0], dat[:,1:]), key=lambda x: x[0])
+    ts_sorted = [row[0] for row in dat_sorted]
+    values_sorted = np.array([row[1] for row in dat_sorted])
+    # create a new traj instance to incorporate only the timepoints and values
+    # of traj1 and traj2
+    traj = Trajectory_mod.Trajectory(net)
+    traj.timepoints = ts_sorted
+    traj.values = values_sorted
+    return traj
+
+
+def traj2expt(traj, datvarids,  netid='net', exptid='expt', CV=0.05, 
+              fix_sf=True, add_noise=False):
+    """
+    expt = Experiment('expt1')
+    data = {'net1':{'data1': {0: (0, 0.037),
+                              2: (0.16575, 0.025),
+                              },
+                    'data2': {0: (1, 0.084),
+                              2: (0.9275, 0.046),
+                              }
+                   }
+           }
+    expt.set_data(data)
+
+
+    len(times) has to match len(traj)
+    noise: 
+        True: noisy data
+        False: perfect 
+    
+    """
+    varids = traj.key_column.keys()
+    data_net = {}
+    for i in range(len(traj.key_column)):
+        varid = varids[i]
+        if varid in datvarids:  # get values of vars for which we have data
+            time2vals = {}
+            for j in range(len(traj.timepoints)):
+                time = traj.timepoints[j]
+                val = traj.values[j, i]
+                se = val * CV  # se: standard error
+                # if the value is zero, standard error is set to CV
+                if val == 0:
+                    se = CV
+                if add_noise:
+                    # np.abs to enforce positivity
+                    val = np.abs(val + np.random.randn() * se)
+                time2vals[time] = (val, se)
+            data_net[varid] = time2vals
+    expt = Experiment(exptid)
+    expt.set_data({netid: data_net})
+    if fix_sf:
+        expt.set_fixed_sf(dict.fromkeys(varids, 1))
+    return expt

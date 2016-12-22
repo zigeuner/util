@@ -7,7 +7,7 @@ import unittest
 
 from SloppyCell.ReactionNetworks import *
 
-from util.sloppycell.mca import mcautil
+from util2.sloppycell.mca import mcautil
 reload(mcautil)
 
 from models.ma1_rev import net as net1

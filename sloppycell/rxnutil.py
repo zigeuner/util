@@ -9,7 +9,7 @@ import numpy as np
 
 from SloppyCell.ReactionNetworks.Reactions import Reaction
 
-from util import butil
+from util2 import butil
 reload(butil)
 
 

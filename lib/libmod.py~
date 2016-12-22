@@ -1,0 +1,57 @@
+
+
+import numpy as np
+import scipy as sp
+
+from SloppyCell.ReactionNetworks import *
+
+import libnet
+reload(libnet)
+
+def jacobian_log_params_sens(mod, log_params):
+    """
+    A replacemnet of ...
+    """
+    params = sp.exp(log_params)
+    jac = jacobian_sens(mod, params)
+    jac_log = jac.copy()
+    jac_log.update(np.asarray(jac) * np.asarray(params))
+    return jac_log
+
+
+def jacobian_sens(mod, params):
+    """
+    A replacement of ...
+    """
+    nets = mod.GetCalculationCollection()
+    residuals = mod.GetResiduals()
+    jac = KeyedList()
+    for net in nets:
+        J_net = libnet.get_steady_state_jac(net, params)
+        for (resid, res) in residuals.items():
+            # two kinds of residuals: one from data and one from priors;
+            # only data residuals have ids in tuple
+            if isinstance(resid, tuple) and res.calcKey==net.id:
+                rowidx = net.dynamicVars.keys().index(res.yKey)
+                # scaled by sigma
+                sens = np.array(J_net[rowidx]/res.ySigma).flatten().tolist()
+                jac.set(resid, sens)
+    return jac
+        
+
+def add_priors(mod, params=None, factor=100):
+    """
+    factor: a parameter indicating the variation of the parameter;
+            with 0.95 probability that the parameter is going to be between
+            mean*factor and mean/factor
+    """
+    if params is None:
+        params = mod.params
+    # make params a mapping object
+    if not hasattr(params, 'items'):  # not a mapping object
+        params = KeyedList(zip(mod.params.keys(), params))
+    for paramid, paramval in params.items():
+        res = Residuals.PriorInLog('prior_'+paramid, paramid, np.log(paramval),
+                                   np.log(np.sqrt(factor)))
+        mod.AddResidual(res)
+    return mod

@@ -1,0 +1,312 @@
+"""
+Some utility functions for the SloppyCell ensemble 
+constructions and analysis.
+"""
+
+from __future__ import division
+
+try:
+    from collections import OrderedDict as OD  # Python 2.7
+except ImportError:
+    import ordereddict as OD  # Python 2.6
+
+import numpy as np
+import scipy as sp
+import matplotlib.pyplot as plt
+
+import libnet
+reload(libnet)
+import libmca
+reload(libmca)
+
+from SloppyCell.ReactionNetworks import *
+
+
+class MatrixEnsemble(np.ndarray):
+    def __new__(cls, mats, rowvarids=None, colvarids=None, energies=None):
+        """
+        gs: free energies
+        """
+        obj = np.asarray(mats).view(cls)
+        obj.rowvarids = rowvarids
+        obj.colvarids = colvarids
+        obj.energies = np.array(energies)
+        return obj
+ 
+
+    def __array__finalize__(self, obj):
+        if obj is None: 
+            return
+        self.rowvarids = getattr(obj, 'rowvarids', None)
+        self.colvarids = getattr(obj, 'colvarids', None)
+        self.energies = getattr(obj, 'energies', None)
+
+
+    @property
+    def matshape(self):
+        return self[0].shape
+
+
+    def decorrelate(self, b, k):
+        """
+        Remove burn-in portions, and decorrelate the sample.
+        b: burn-in ratio
+        k: correlation length
+        """
+        ens = self[int(len(self)*b)::k]  # slice index must be integers
+        energies = self.energies[int(len(self)*b)::k]
+        return MatrixEnsemble(ens, rowvarids=self.rowvarids,
+                              colvarids=self.colvarids, energies=energies)
+
+    
+    def get_unique_ensemble(self):
+        """
+        Return a new MatrixEnsemble instance with repeating elements removed.
+        """
+        dat = list(set([(self[i], self.energies[i]) 
+                        for i in range(len(self))]))
+        ens = [item[0] for item in dat]
+        energies = [item[1] for item in dat]
+        return MatrixEnsemble(ens, rowvarids=self.rowvarids,
+                              colvarids=self.colvarids, energies=energies)
+    
+    
+    def get_sorted_ensemble(self):
+        """
+        Return a new MatrixEnsemble instance with elements sorted by energy.
+        """
+        dat = [(self[i], self.energies[i]) for i in range(len(self))]
+        dat_sorted = sorted(dat, key=lambda item: item[1])
+        return MatrixEnsemble(dat_sorted[0], rowvarids=self.rowvarids,
+                              colvarids=self.colvarids, energies=dat_sorted[1])
+        
+
+    def plot_hist(self, idx):
+        """
+        idx: a multiple index (a tuple) in the case
+        """
+        pass
+
+
+    def plot_checkerboard(self, figtitle, filepath):
+        """
+        Pairwise correlation.
+        """
+        if self.matshape[0] != 1:
+            raise StandardError, "matrix is not one-dimensional."
+        n = len(self.colvarids)
+        # this step is going to take around 10 seconds
+        f, axarr = plt.subplots(n, n)
+        for i, j in np.ndindex((n, n)):
+            arr_i = self[:, 0, i]
+            arr_j = self[:, 0, j]
+            axarr[i, j].scatter(arr_i, arr_j)
+        #axarr.set_title(figtitle)
+        plt.savefig(filepath)
+
+
+    def get_low_energy_ensemble(self, energy_cutoff):
+        """
+        """
+        idxs = self.energies < energy_cutoff
+        ens_ground, energies_ground = ens[idxs], ens.energies[idxs]
+        return MatrixEnsemble(ens_ground, rowvarids=self.rowvarids,
+                              colvarids=self.colvarids, 
+                              energies=energies_ground)
+
+    
+    def plot_QQ_Boltzmann_distribution(self, ninterval=10, 
+                      figtitle='Quantile-Quantile Plot of Energy Distribution',
+                                       filepath=''):
+        """
+        """
+        ps = np.arange(0, 1, 1/ninterval)
+        ## Get the quantiles of data (energies).
+        energies = self.energies
+        energy_max = np.max(energies)
+        energy_quantiles = sp.stats.mstats.mquantiles(energies, ps)
+        ## Get the quantiles of Boltzmann distribution.
+        probs = np.exp(-energies)/np.sum(np.exp(-energies))
+        cumprobs = np.cumsum(probs)
+        idxs = [np.abs(cumprobs-p).argmin() for p in ps]
+        energy_quantiles_boltz = energies[idxs]
+        ## Make the figure.
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+        ax.scatter(energy_quantiles, energy_quantiles_boltz)
+        ax.plot([0, energy_max], [0, energy_max], 'r')
+        ax.set_aspect('equal')
+        ax.set_xlim(0, energy_max)
+        ax.set_ylim(0, energy_max)
+        ax.set_xlabel('Energy of States in the Ensemble')
+        ax.set_ylabel('Energy of States in Boltzmann Distribution')
+        ax.set_title(figtitle)
+        plt.savefig(filepath)
+        
+    
+    def get_variable_ensemble(self, net, get_var, time=np.inf):
+        """
+        Return an ensemble instance
+        get_var: a function that takes a network as the only input
+        """
+        ens = []
+        for paramvals in self:
+            libnet.update_net(net, paramvals, time=time)
+            ens.append(get_var(net))
+        ens = MatrixEnsemble(ens, rowvarids=self.rowvarids, 
+                             colvarids=self.colvarids, energies=self.energies)
+        return ens
+
+
+    def get_quantiles(self, ps=[0.025,0.5,0.975], normalize=True, log=True):
+        """
+        Compute the quantiles for the variation of each variable.
+        """
+        qs = np.ndarray(list(self.matshape) + [len(ps)])
+        for i, j in np.ndindex(self.matshape):
+            arr = self[:, i, j]
+            qs[i, j] = sp.stats.mstats.mquantiles(arr, ps)
+
+        if normalize:
+            medians = np.median(self, axis=0)
+            medians = np.repeat(medians, len(ps), axis=1).reshape(qs.shape)
+            qs = qs / medians
+        if log:
+            if np.any(qs < 0):
+                raise ValueError, "some quantiles are < 0 & can't take log."
+            else:
+                qs = np.log10(qs)
+        return qs
+
+
+    def plot_quantiles(self, ps=[0.025,0.5,0.975], normalize=False, log=False, 
+                       initvals=None, sort_by_range=False,
+                       figtitle='Ensemble Variation', filepath=''):
+        """
+        """
+        qs = self.get_quantiles(ps=ps, normalize=normalize, log=log)
+        nrow, ncol = self.matshape
+        fig = plt.figure()
+        for i in range(nrow):
+            ax = fig.add_subplot(nrow, 1, i)
+            heights = qs[i,:,-1] - qs[i,:,0]
+            bottoms = qs[i,:,0]
+            ax.bar(np.arange(ncol)-0.4, heights, bottom=bottoms, width=0.8)
+            if initvals is not None:
+                ax.plot(np.arange(ncol), initvals[i,:], 'or')
+            for j in range(ncol):
+                for k in range(len(ps)):
+                    q_var = qs[i, j, k]
+                    ax.plot([j-0.4, j+0.4], [q_var, q_var], '-r', linewidth=1)
+            if self.rowvarids:
+                ax.set_ylabel(self.rowvarids[i])
+            ax.set_xlim(-0.5, ncol-0.5)
+            #ax.set_ylabel('$log_{10}$(normalized quantile)')
+        if self.colvarids:      
+            plt.xticks(np.arange(ncol), self.colvarids, size=7, 
+                       rotation='vertical')
+
+        plt.title(figtitle)
+        plt.savefig(filepath)
+
+
+    """    
+    ranges = [value[1]-value[0] for value in optvarid2info.values()]
+    bottoms = [value[0] for value in optvarid2info.values()]
+    medians = [value[2] for value in optvarid2info.values()]
+
+    ## Get the initial values of parameters.
+    if optvarvals0:
+        if not hasattr(optvarvals0, 'items'):  # then not a mapping object
+            optvarvals0 =  dict(zip(optvarids0, optvarvals0)) 
+        # get the correct ordering.
+        optvarvals0 = [optvarvals0.get(optvarid) for optvarid in optvarids]
+        # optvarlnvals0: log-normalized initial values of optimizable variables
+        optvarlnvals0 = np.log10(np.array(optvarvals0)/np.array(medians))
+
+    if plot_medians:
+        optvarids = [optvarids[i] + '\n(' + '%.1E' % medians[i] +')' 
+                     for i in range(len(optvarids))]
+        
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    ax.bar(np.arange(len(optvarids))-0.4, ranges, bottom=bottoms, width=0.8)
+    # plot the initial values of parameters
+    if optvarvals0:
+        ax.plot(np.arange(len(optvarids)), optvarlnvals0, 'or')
+    ax.set_xticks(np.arange(len(optvarids)))
+    ax.set_xticklabels(optvarids, size=7, rotation='vertical')
+    ax.set_xlim(-0.5, len(optvarids)-0.5)
+    ax.set_ylabel('$log_{10}$(normalized quantile)')
+    ax.set_title(title_fig)
+    #plt.subplots_adjust(left=0.25, right=0.7, bottom=0.2, top=0.8)
+    plt.savefig(title_file)
+    """ 
+
+
+
+    """
+    def get_lognormalized_quantiles(self, ps=[0.025,0.5,0.975], log=True, 
+                                    sort_by_range=True):
+        varid2ps = get_quantiles(ens, optvarids, ps=ps)
+    
+        ## Log-normalize the quantiles.
+        log = eval('np.log'+str(logbase))
+        # a function mapping from quantiles (qs) to 
+        # log-normalized quantiles (lnqs)
+        qs2lnqs = lambda ps: (log(qs[0]/qs[1]), 0, log(qs[2]/qs[1]))
+        varid2lnqs = OD(zip(varid2qs.keys(), 
+                            map(qs2lnqs, varid2qs.values())))
+
+        ## Sort varid2lnqs by the range of variation.
+        # range = log-normalized(qhigh) - log-normalized(qlow), 
+        # minus b/c the latter is always negative
+        if sort:
+            varid2lnqs = OD(sorted(varid2lnqs.items(), 
+                                   key=lambda item: item[1][2]-item[1][0]))
+    
+        ## Replace the log-normalized(median) (which is always 1) by 
+        # the bare median.
+        # a function mapping from old items (varid, (ln(plow), 1, ln(phigh))) to
+        # new items (varid, (ln(qlow), ln(qhigh), median));
+        # I call the tuple (ln(qlow), lh(qhigh), median) "info"
+            olditem2newitem = lambda item: (item[0], 
+                                (item[1][0], item[1][2], varid2qs[item[0]][1]))
+            varid2info = OD(map(olditem2newitem, varid2lnqs.items()))
+            return varid2info
+    """
+
+
+"""
+    optvarids = optvarid2info.keys()
+    ranges = [value[1]-value[0] for value in optvarid2info.values()]
+    bottoms = [value[0] for value in optvarid2info.values()]
+    medians = [value[2] for value in optvarid2info.values()]
+
+    ## Get the initial values of parameters.
+    if optvarvals0:
+        if not hasattr(optvarvals0, 'items'):  # then not a mapping object
+            optvarvals0 =  dict(zip(optvarids0, optvarvals0)) 
+        # get the correct ordering.
+        optvarvals0 = [optvarvals0.get(optvarid) for optvarid in optvarids]
+        # optvarlnvals0: log-normalized initial values of optimizable variables
+        optvarlnvals0 = np.log10(np.array(optvarvals0)/np.array(medians))
+
+    if plot_medians:
+        optvarids = [optvarids[i] + '\n(' + '%.1E' % medians[i] +')' 
+                     for i in range(len(optvarids))]
+        
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    ax.bar(np.arange(len(optvarids))-0.4, ranges, bottom=bottoms, width=0.8)
+    # plot the initial values of parameters
+    if optvarvals0:
+        ax.plot(np.arange(len(optvarids)), optvarlnvals0, 'or')
+    ax.set_xticks(np.arange(len(optvarids)))
+    ax.set_xticklabels(optvarids, size=7, rotation='vertical')
+    ax.set_xlim(-0.5, len(optvarids)-0.5)
+    ax.set_ylabel('$log_{10}$(normalized percentile)')
+    ax.set_title(title_fig)
+    #plt.subplots_adjust(left=0.25, right=0.7, bottom=0.2, top=0.8)
+    plt.savefig(title_file)
+"""
